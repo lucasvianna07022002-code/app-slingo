@@ -2,7 +2,11 @@
 
 import { TrendingUp, Target, Zap, Calendar, Award, Activity } from "lucide-react";
 
-export default function TrendScreen() {
+interface TrendScreenProps {
+  userProfile?: any;
+}
+
+export default function TrendScreen({ userProfile }: TrendScreenProps) {
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
@@ -14,6 +18,33 @@ export default function TrendScreen() {
           Projeção do seu futuro
         </p>
       </div>
+
+      {/* User Profile Summary - Exibir dados do formulário */}
+      {userProfile && (
+        <div className="p-6 rounded-2xl bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-12 h-12 rounded-2xl bg-white/60 backdrop-blur-sm flex items-center justify-center">
+              <Target className="w-6 h-6 text-blue-600" />
+            </div>
+            <div>
+              <p className="text-sm text-slate-600">Sua Meta</p>
+              <h3 className="text-2xl font-bold text-slate-800">{userProfile.peso_desejado} kg</h3>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <p className="text-xs text-slate-500">Peso Atual</p>
+              <p className="text-lg font-bold text-blue-600">{userProfile.peso_atual} kg</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-500">Falta Perder</p>
+              <p className="text-lg font-bold text-orange-600">
+                {(userProfile.peso_atual - userProfile.peso_desejado).toFixed(1)} kg
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Empty State - Sem dados suficientes */}
       <div className="p-6 rounded-2xl bg-gradient-to-br from-slate-100 to-slate-200 border border-slate-300">
@@ -56,7 +87,7 @@ export default function TrendScreen() {
         <ProjectionCard
           icon={Award}
           title="Meta Final"
-          description="Configure sua meta primeiro"
+          description={userProfile ? `Chegar aos ${userProfile.peso_desejado} kg` : "Configure sua meta primeiro"}
           progress={0}
           color="slate"
           locked={true}

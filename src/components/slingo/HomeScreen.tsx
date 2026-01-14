@@ -5,18 +5,21 @@ import { useMealStorage } from "@/lib/hooks/useMealStorage";
 import { useWorkoutStorage } from "@/lib/hooks/useWorkoutStorage";
 import { Meal } from "@/lib/types/meal";
 import { useState, useEffect } from "react";
+import { calculateNutritionalNeeds, extractUserDataFromProfile } from "@/lib/nutritionCalculator";
 
 interface HomeScreenProps {
   onAddMeal: () => void;
   onAddWorkout: () => void;
+  userProfile?: any;
 }
 
-export default function HomeScreen({ onAddMeal, onAddWorkout }: HomeScreenProps) {
+export default function HomeScreen({ onAddMeal, onAddWorkout, userProfile }: HomeScreenProps) {
   const { getDailyTotals, getMealsByType } = useMealStorage();
   const { hasWorkoutToday } = useWorkoutStorage();
-  const dailyTotals = getDailyTotals();
+  const [dailyTotals, setDailyTotals] = useState(getDailyTotals());
   const [mounted, setMounted] = useState(false);
   const [today, setToday] = useState("");
+  const [waterIntake, setWaterIntake] = useState(0);
 
   useEffect(() => {
     setMounted(true);
@@ -25,17 +28,70 @@ export default function HomeScreen({ onAddMeal, onAddWorkout }: HomeScreenProps)
       day: "numeric",
       month: "long",
     }));
+
+    // Carregar consumo de água do dia
+    const savedWater = localStorage.getItem(`water_${new Date().toDateString()}`);
+    if (savedWater) {
+      setWaterIntake(parseFloat(savedWater));
+    }
+
+    // Resetar água à meia-noite
+    const now = new Date();
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(0, 0, 0, 0);
+    const msUntilMidnight = tomorrow.getTime() - now.getTime();
+
+    const midnightTimer = setTimeout(() => {
+      setWaterIntake(0);
+      localStorage.removeItem(`water_${new Date().toDateString()}`);
+    }, msUntilMidnight);
+
+    return () => clearTimeout(midnightTimer);
   }, []);
 
-  // Metas diárias (ajustadas com treino)
-  const BASE_CALORIES = 2000;
+  // Listener para atualizar gráficos quando refeições forem adicionadas
+  useEffect(() => {
+    const handleStorageChange = () => {
+      setDailyTotals(getDailyTotals());
+    };
+
+    // Atualizar quando houver mudanças no localStorage
+    window.addEventListener('storage', handleStorageChange);
+    
+    // Atualizar também quando o componente receber foco (para mudanças na mesma aba)
+    window.addEventListener('focus', handleStorageChange);
+
+    // Polling para garantir atualização imediata (verifica a cada 500ms)
+    const interval = setInterval(handleStorageChange, 500);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('focus', handleStorageChange);
+      clearInterval(interval);
+    };
+  }, [getDailyTotals]);
+
+  // Calcular metas personalizadas baseadas no perfil do usuário
+  const userData = userProfile ? extractUserDataFromProfile(userProfile) : null;
+  const nutritionalNeeds = userData ? calculateNutritionalNeeds(userData) : null;
+
+  // Metas diárias (personalizadas ou padrão)
+  const BASE_CALORIES = nutritionalNeeds?.calories || 2000;
   const adjustedCalorieGoal = BASE_CALORIES + dailyTotals.caloriesBurned;
 
   const DAILY_GOALS = {
     calories: adjustedCalorieGoal,
-    water: 2.5,
-    protein: 80,
-    carbs: 250,
+    water: nutritionalNeeds?.water || 2.5,
+    protein: nutritionalNeeds?.protein || 80,
+    carbs: nutritionalNeeds?.carbs || 250,
+    fat: nutritionalNeeds?.fat || 70,
+  };
+
+  const handleAddWater = () => {
+    const newWaterIntake = waterIntake + 0.25;
+    setWaterIntake(newWaterIntake);
+    localStorage.setItem(`water_${new Date().toDateString()}`, newWaterIntake.toString());
   };
 
   const getMealInfo = (type: Meal["type"]) => {
@@ -84,22 +140,39 @@ export default function HomeScreen({ onAddMeal, onAddWorkout }: HomeScreenProps)
         <p className="text-sm text-slate-500 capitalize" suppressHydrationWarning>
           {mounted ? today : "Carregando..."}
         </p>
-        <h2 className="text-xl font-inter font-semibold text-slate-800 mt-1">
-          Seu Dia Alimentar
-        </h2>
       </div>
 
-      {/* Daily Stats - Calorias, Carboidratos e Proteína */}
+      {/* Calorias - Card Grande em Retângulo */}
+      <div className="bg-gradient-to-br from-orange-50 to-orange-100 border border-orange-200 rounded-2xl p-5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-orange-500 to-orange-600 shadow-lg shadow-orange-500/30 flex items-center justify-center">
+              <Flame className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <p className="text-xs text-slate-500 mb-0.5">Calorias</p>
+              <p className="text-2xl font-bold text-slate-800">{dailyTotals.calories}</p>
+            </div>
+          </div>
+          <div className="text-right">
+            <p className="text-xs text-slate-500 mb-0.5">Meta</p>
+            <p className="text-lg font-semibold text-orange-600" suppressHydrationWarning>
+              {mounted ? formatNumber(DAILY_GOALS.calories) : formatNumber(DAILY_GOALS.calories)}
+            </p>
+          </div>
+        </div>
+        
+        {/* Progress Bar */}
+        <div className="w-full h-2 bg-orange-200 rounded-full overflow-hidden mt-4">
+          <div
+            className="h-full bg-orange-500 transition-all duration-500"
+            style={{ width: `${Math.min((dailyTotals.calories / DAILY_GOALS.calories) * 100, 100)}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Carboidratos, Proteínas e Gorduras - Grid 3 colunas */}
       <div className="grid grid-cols-3 gap-3">
-        <StatCard
-          icon={Flame}
-          label="Calorias"
-          value={dailyTotals.calories.toString()}
-          target={formatNumber(DAILY_GOALS.calories)}
-          color="orange"
-          progress={(dailyTotals.calories / DAILY_GOALS.calories) * 100}
-          mounted={mounted}
-        />
         <StatCard
           icon={Activity}
           label="Carboidratos"
@@ -116,6 +189,15 @@ export default function HomeScreen({ onAddMeal, onAddWorkout }: HomeScreenProps)
           target={`${DAILY_GOALS.protein}g`}
           color="green"
           progress={(dailyTotals.protein / DAILY_GOALS.protein) * 100}
+          mounted={mounted}
+        />
+        <StatCard
+          icon={Activity}
+          label="Gorduras"
+          value={`${dailyTotals.fat}g`}
+          target={`${DAILY_GOALS.fat}g`}
+          color="purple"
+          progress={(dailyTotals.fat / DAILY_GOALS.fat) * 100}
           mounted={mounted}
         />
       </div>
@@ -150,10 +232,13 @@ export default function HomeScreen({ onAddMeal, onAddWorkout }: HomeScreenProps)
             </div>
             <div>
               <p className="text-sm font-semibold text-slate-800">Água</p>
-              <p className="text-xs text-slate-500">0L de {DAILY_GOALS.water}L</p>
+              <p className="text-xs text-slate-500">{waterIntake.toFixed(1)}L de {DAILY_GOALS.water}L</p>
             </div>
           </div>
-          <button className="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white text-xs font-medium rounded-lg transition-colors">
+          <button 
+            onClick={handleAddWater}
+            className="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white text-xs font-medium rounded-lg transition-colors"
+          >
             + 250ml
           </button>
         </div>
@@ -162,7 +247,7 @@ export default function HomeScreen({ onAddMeal, onAddWorkout }: HomeScreenProps)
         <div className="w-full h-2 bg-blue-200 rounded-full overflow-hidden">
           <div
             className="h-full bg-blue-500 transition-all duration-500"
-            style={{ width: `0%` }}
+            style={{ width: `${Math.min((waterIntake / DAILY_GOALS.water) * 100, 100)}%` }}
           />
         </div>
       </div>
@@ -263,7 +348,7 @@ function StatCard({
   label: string;
   value: string;
   target: string;
-  color: "orange" | "blue" | "green";
+  color: "orange" | "blue" | "green" | "purple";
   progress: number;
   mounted: boolean;
 }) {
@@ -271,18 +356,21 @@ function StatCard({
     orange: "from-orange-500 to-orange-600 shadow-orange-500/30",
     blue: "from-blue-500 to-blue-600 shadow-blue-500/30",
     green: "from-emerald-500 to-emerald-600 shadow-emerald-500/30",
+    purple: "from-purple-500 to-purple-600 shadow-purple-500/30",
   };
 
   const bgClasses = {
     orange: "bg-orange-50 border-orange-100",
     blue: "bg-blue-50 border-blue-100",
     green: "bg-emerald-50 border-emerald-100",
+    purple: "bg-purple-50 border-purple-100",
   };
 
   const progressColors = {
     orange: "bg-orange-500",
     blue: "bg-blue-500",
     green: "bg-emerald-500",
+    purple: "bg-purple-500",
   };
 
   return (

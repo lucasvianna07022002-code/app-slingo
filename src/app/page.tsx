@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { Home, Calendar, TrendingUp, Sparkles, Plus, Award, Cookie } from "lucide-react";
 import HomeScreen from "@/components/slingo/HomeScreen";
 import HistoryScreen from "@/components/slingo/HistoryScreen";
@@ -10,15 +11,65 @@ import AddMealSheet from "@/components/slingo/AddMealSheet";
 import WorkoutSheet from "@/components/slingo/WorkoutSheet";
 import { useWorkoutStorage } from "@/lib/hooks/useWorkoutStorage";
 import { Workout } from "@/lib/types/meal";
+import { getCurrentUser } from "@/lib/auth";
+import { supabase } from "@/lib/supabase";
 
 type Screen = "home" | "history" | "trend" | "sos";
 
 export default function SlingoApp() {
+  const router = useRouter();
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [activeScreen, setActiveScreen] = useState<Screen>("home");
   const [isAddMealOpen, setIsAddMealOpen] = useState(false);
   const [isWorkoutOpen, setIsWorkoutOpen] = useState(false);
   const [showWorkoutFeedback, setShowWorkoutFeedback] = useState(false);
+  const [userProfile, setUserProfile] = useState<any>(null);
   const { addWorkout } = useWorkoutStorage();
+
+  // Verificar autenticação e perfil
+  useEffect(() => {
+    let mounted = true;
+    
+    const checkAuth = async () => {
+      try {
+        const user = await getCurrentUser();
+        if (!user && mounted) {
+          router.replace("/login");
+        } else if (user && mounted) {
+          // Verificar se tem perfil
+          const { data, error } = await supabase
+            .from("user_profiles")
+            .select("*")
+            .eq("user_id", user.id)
+            .single();
+
+          if (!data && mounted) {
+            // Não tem perfil, redirecionar para onboarding
+            router.replace("/onboarding");
+          } else if (data && mounted) {
+            setUserProfile(data);
+            setIsAuthenticated(true);
+          }
+        }
+      } catch (err) {
+        console.error("Erro ao verificar autenticação:", err);
+        if (mounted) {
+          router.replace("/login");
+        }
+      } finally {
+        if (mounted) {
+          setIsLoading(false);
+        }
+      }
+    };
+    
+    checkAuth();
+    
+    return () => {
+      mounted = false;
+    };
+  }, [router]);
 
   const handleWorkoutRegister = (workoutData: {
     type: Workout["type"];
@@ -55,12 +106,13 @@ export default function SlingoApp() {
           <HomeScreen
             onAddMeal={() => setIsAddMealOpen(true)}
             onAddWorkout={() => setIsWorkoutOpen(true)}
+            userProfile={userProfile}
           />
         );
       case "history":
         return <HistoryScreen />;
       case "trend":
-        return <TrendScreen />;
+        return <TrendScreen userProfile={userProfile} />;
       case "sos":
         return <SOSScreen />;
       default:
@@ -68,10 +120,30 @@ export default function SlingoApp() {
           <HomeScreen
             onAddMeal={() => setIsAddMealOpen(true)}
             onAddWorkout={() => setIsWorkoutOpen(true)}
+            userProfile={userProfile}
           />
         );
     }
   };
+
+  // Tela de loading enquanto verifica autenticação
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-100">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-16 h-16 rounded-3xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-2xl shadow-blue-500/40 animate-pulse">
+            <Sparkles className="w-8 h-8 text-white" />
+          </div>
+          <div className="w-8 h-8 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
+        </div>
+      </div>
+    );
+  }
+
+  // Não renderizar nada se não estiver autenticado (vai redirecionar)
+  if (!isAuthenticated) {
+    return null;
+  }
 
   return (
     <div className="min-h-screen flex flex-col max-w-md mx-auto relative">

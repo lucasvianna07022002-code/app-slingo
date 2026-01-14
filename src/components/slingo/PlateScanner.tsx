@@ -3,16 +3,26 @@
 import { useState, useRef } from "react";
 import { Camera, Check, Loader2, Edit2, Plus, Minus } from "lucide-react";
 import { PlateAnalysisResult, NutritionInfo } from "@/lib/types/meal";
+import { findTacoFood, calculateNutrition, extractQuantityFromPortion, TacoFood } from "@/lib/tacoTable";
 
 interface PlateScannerProps {
   onResult: (result: PlateAnalysisResult) => void;
   onBack: () => void;
 }
 
+interface FoodWithQuantity {
+  name: string;
+  estimatedPortion: string;
+  nutrition: NutritionInfo;
+  confidence: number;
+  tacoFood: TacoFood | null;
+  currentQuantity: number; // Quantidade atual de porções
+}
+
 export default function PlateScanner({ onResult, onBack }: PlateScannerProps) {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<PlateAnalysisResult | null>(null);
-  const [editedFoods, setEditedFoods] = useState<PlateAnalysisResult["foods"]>([]);
+  const [editedFoods, setEditedFoods] = useState<FoodWithQuantity[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleCapture = async () => {
@@ -28,63 +38,101 @@ export default function PlateScanner({ onResult, onBack }: PlateScannerProps) {
     // Simular análise de IA (em produção, usar OpenAI Vision API)
     await new Promise((resolve) => setTimeout(resolve, 3000));
 
-    // Resultado simulado
-    const mockResult: PlateAnalysisResult = {
-      foods: [
-        {
-          name: "Arroz Branco",
-          estimatedPortion: "2 colheres de sopa",
-          nutrition: { calories: 130, carbs: 28, protein: 2.7, fat: 0.3 },
+    // Resultado simulado com busca na tabela TACO
+    const mockFoods = [
+      { name: "Arroz Branco", portion: "2 colheres de sopa" },
+      { name: "Feijão Preto", portion: "1 concha" },
+      { name: "Frango Grelhado", portion: "1 filé" },
+      { name: "Salada Verde", portion: "1 porção" },
+    ];
+
+    const foodsWithTaco: FoodWithQuantity[] = mockFoods.map((food) => {
+      const tacoFood = findTacoFood(food.name);
+      const quantity = extractQuantityFromPortion(food.portion);
+      
+      if (tacoFood) {
+        const nutrition = calculateNutrition(tacoFood, quantity, "portion");
+        return {
+          name: tacoFood.name,
+          estimatedPortion: food.portion,
+          nutrition,
           confidence: 0.92,
-        },
-        {
-          name: "Feijão Preto",
-          estimatedPortion: "1 concha",
-          nutrition: { calories: 127, carbs: 23, protein: 9, fat: 0.5 },
-          confidence: 0.88,
-        },
-        {
-          name: "Frango Grelhado",
-          estimatedPortion: "150g",
-          nutrition: { calories: 248, carbs: 0, protein: 46, fat: 5.4 },
-          confidence: 0.95,
-        },
-        {
-          name: "Salada Verde",
-          estimatedPortion: "1 porção",
-          nutrition: { calories: 25, carbs: 5, protein: 2, fat: 0.3 },
-          confidence: 0.85,
-        },
-      ],
-      totalNutrition: {
-        calories: 530,
-        carbs: 56,
-        protein: 59.7,
-        fat: 6.5,
-      },
+          tacoFood,
+          currentQuantity: quantity,
+        };
+      }
+      
+      // Fallback se não encontrar na TACO
+      return {
+        name: food.name,
+        estimatedPortion: food.portion,
+        nutrition: { calories: 100, carbs: 20, protein: 5, fat: 2 },
+        confidence: 0.85,
+        tacoFood: null,
+        currentQuantity: quantity,
+      };
+    });
+
+    const totalNutrition = foodsWithTaco.reduce(
+      (acc, food) => ({
+        calories: acc.calories + food.nutrition.calories,
+        carbs: acc.carbs + food.nutrition.carbs,
+        protein: acc.protein + food.nutrition.protein,
+        fat: acc.fat + food.nutrition.fat,
+      }),
+      { calories: 0, carbs: 0, protein: 0, fat: 0 }
+    );
+
+    const mockResult: PlateAnalysisResult = {
+      foods: foodsWithTaco.map(f => ({
+        name: f.name,
+        estimatedPortion: f.estimatedPortion,
+        nutrition: f.nutrition,
+        confidence: f.confidence,
+      })),
+      totalNutrition,
     };
 
     setAnalysisResult(mockResult);
-    setEditedFoods(mockResult.foods);
+    setEditedFoods(foodsWithTaco);
     setIsAnalyzing(false);
   };
 
-  const handleAdjustPortion = (index: number, adjustment: number) => {
+  const handleAdjustQuantity = (index: number, increment: boolean) => {
     const newFoods = [...editedFoods];
     const food = newFoods[index];
 
-    // Ajustar em 25% para cima ou para baixo
-    const multiplier = adjustment > 0 ? 1.25 : 0.75;
+    if (!food.tacoFood) {
+      // Se não tem dados TACO, ajusta proporcionalmente (fallback antigo)
+      const multiplier = increment ? 1.25 : 0.75;
+      newFoods[index] = {
+        ...food,
+        nutrition: {
+          calories: Math.round(food.nutrition.calories * multiplier),
+          carbs: Math.round(food.nutrition.carbs * multiplier * 10) / 10,
+          protein: Math.round(food.nutrition.protein * multiplier * 10) / 10,
+          fat: Math.round(food.nutrition.fat * multiplier * 10) / 10,
+        },
+      };
+    } else {
+      // Ajusta a quantidade de porções (incremento de 0.5)
+      const newQuantity = increment 
+        ? food.currentQuantity + 0.5 
+        : Math.max(0.5, food.currentQuantity - 0.5);
 
-    newFoods[index] = {
-      ...food,
-      nutrition: {
-        calories: Math.round(food.nutrition.calories * multiplier),
-        carbs: Math.round(food.nutrition.carbs * multiplier),
-        protein: Math.round(food.nutrition.protein * multiplier),
-        fat: Math.round(food.nutrition.fat * multiplier),
-      },
-    };
+      const newNutrition = calculateNutrition(food.tacoFood, newQuantity, "portion");
+      
+      // Atualiza a descrição da porção
+      const portionUnit = food.tacoFood.portionReference.replace(/^\d+(\.\d+)?\s*/, "");
+      const newPortionDescription = `${newQuantity} ${portionUnit}${newQuantity !== 1 ? 's' : ''}`;
+
+      newFoods[index] = {
+        ...food,
+        currentQuantity: newQuantity,
+        estimatedPortion: newPortionDescription,
+        nutrition: newNutrition,
+      };
+    }
 
     setEditedFoods(newFoods);
   };
@@ -104,8 +152,12 @@ export default function PlateScanner({ onResult, onBack }: PlateScannerProps) {
   const handleConfirm = () => {
     if (analysisResult) {
       onResult({
-        ...analysisResult,
-        foods: editedFoods,
+        foods: editedFoods.map(f => ({
+          name: f.name,
+          estimatedPortion: f.estimatedPortion,
+          nutrition: f.nutrition,
+          confidence: f.confidence,
+        })),
         totalNutrition: calculateTotals(),
       });
     }
@@ -178,7 +230,7 @@ export default function PlateScanner({ onResult, onBack }: PlateScannerProps) {
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <h4 className="text-sm font-semibold text-slate-700">Alimentos Identificados</h4>
-              <span className="text-xs text-slate-500">Ajuste as porções se necessário</span>
+              <span className="text-xs text-slate-500">Ajuste as quantidades</span>
             </div>
 
             {editedFoods.map((food, index) => (
@@ -205,17 +257,22 @@ export default function PlateScanner({ onResult, onBack }: PlateScannerProps) {
                           {Math.round(food.confidence * 100)}% confiança
                         </span>
                       </div>
+                      {food.tacoFood && (
+                        <span className="text-xs text-purple-600 font-medium">
+                          • Tabela TACO
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="flex gap-1">
                     <button
-                      onClick={() => handleAdjustPortion(index, -1)}
+                      onClick={() => handleAdjustQuantity(index, false)}
                       className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors"
                     >
                       <Minus className="w-4 h-4 text-slate-600" />
                     </button>
                     <button
-                      onClick={() => handleAdjustPortion(index, 1)}
+                      onClick={() => handleAdjustQuantity(index, true)}
                       className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors"
                     >
                       <Plus className="w-4 h-4 text-slate-600" />
@@ -275,7 +332,7 @@ export default function PlateScanner({ onResult, onBack }: PlateScannerProps) {
           <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
             <p className="text-sm text-amber-700">
               💡 <span className="font-semibold">Dica:</span> Use os botões + e - para ajustar as
-              porções estimadas antes de confirmar.
+              quantidades. Os valores nutricionais são calculados automaticamente com base na tabela TACO.
             </p>
           </div>
 

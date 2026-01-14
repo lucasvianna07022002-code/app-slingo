@@ -179,14 +179,14 @@ export default function AddMealSheet({ isOpen, onClose }: AddMealSheetProps) {
                   onClick={() => setMealType("lunch")}
                 />
                 <MealTypeButton
-                  label="Lanche"
-                  active={mealType === "snack"}
-                  onClick={() => setMealType("snack")}
-                />
-                <MealTypeButton
                   label="Jantar"
                   active={mealType === "dinner"}
                   onClick={() => setMealType("dinner")}
+                />
+                <MealTypeButton
+                  label="Outros"
+                  active={mealType === "snack"}
+                  onClick={() => setMealType("snack")}
                 />
               </div>
 
