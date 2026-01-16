@@ -1,11 +1,11 @@
 "use client";
 
 import { Coffee, Sun, Moon, Flame, Droplets, Activity, ChevronRight, Plus } from "lucide-react";
-import { useMealStorage } from "@/lib/hooks/useMealStorage";
-import { useWorkoutStorage } from "@/lib/hooks/useWorkoutStorage";
 import { Meal } from "@/lib/types/meal";
 import { useState, useEffect } from "react";
 import { calculateNutritionalNeeds, extractUserDataFromProfile } from "@/lib/nutritionCalculator";
+import { getTodayMeals, getTodayActivities } from "@/lib/supabase/queries";
+import { supabase } from "@/lib/supabase/client";
 
 interface HomeScreenProps {
   onAddMeal: () => void;
@@ -14,12 +14,27 @@ interface HomeScreenProps {
 }
 
 export default function HomeScreen({ onAddMeal, onAddWorkout, userProfile }: HomeScreenProps) {
-  const { getDailyTotals, getMealsByType } = useMealStorage();
-  const { hasWorkoutToday } = useWorkoutStorage();
-  const [dailyTotals, setDailyTotals] = useState(getDailyTotals());
+  const [dailyTotals, setDailyTotals] = useState({
+    calories: 0,
+    protein: 0,
+    carbs: 0,
+    fat: 0,
+    caloriesBurned: 0,
+  });
+  const [meals, setMeals] = useState<any[]>([]);
   const [mounted, setMounted] = useState(false);
   const [today, setToday] = useState("");
   const [waterIntake, setWaterIntake] = useState(0);
+  const [userId, setUserId] = useState<string | null>(null);
+
+  // Carregar usuário autenticado
+  useEffect(() => {
+    const getUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      setUserId(user?.id || null);
+    };
+    getUser();
+  }, []);
 
   useEffect(() => {
     setMounted(true);
@@ -50,27 +65,51 @@ export default function HomeScreen({ onAddMeal, onAddWorkout, userProfile }: Hom
     return () => clearTimeout(midnightTimer);
   }, []);
 
-  // Listener para atualizar gráficos quando refeições forem adicionadas
+  // Carregar dados do Supabase
   useEffect(() => {
-    const handleStorageChange = () => {
-      setDailyTotals(getDailyTotals());
+    if (!userId) return;
+
+    const loadData = async () => {
+      try {
+        // Buscar refeições de hoje
+        const todayMeals = await getTodayMeals(userId);
+        setMeals(todayMeals);
+
+        // Buscar atividades de hoje
+        const todayActivities = await getTodayActivities(userId);
+
+        // Calcular totais
+        const totals = todayMeals.reduce(
+          (acc, meal) => ({
+            calories: acc.calories + meal.calories,
+            protein: acc.protein + Number(meal.protein),
+            carbs: acc.carbs + Number(meal.carbs),
+            fat: acc.fat + Number(meal.fat),
+            caloriesBurned: acc.caloriesBurned,
+          }),
+          { calories: 0, protein: 0, carbs: 0, fat: 0, caloriesBurned: 0 }
+        );
+
+        // Adicionar calorias queimadas
+        const caloriesBurned = todayActivities.reduce(
+          (acc, activity) => acc + (activity.calories_burned || 0),
+          0
+        );
+        totals.caloriesBurned = caloriesBurned;
+
+        setDailyTotals(totals);
+      } catch (error) {
+        console.error("Erro ao carregar dados:", error);
+      }
     };
 
-    // Atualizar quando houver mudanças no localStorage
-    window.addEventListener('storage', handleStorageChange);
-    
-    // Atualizar também quando o componente receber foco (para mudanças na mesma aba)
-    window.addEventListener('focus', handleStorageChange);
+    loadData();
 
-    // Polling para garantir atualização imediata (verifica a cada 500ms)
-    const interval = setInterval(handleStorageChange, 500);
+    // Atualizar a cada 2 segundos para pegar mudanças em tempo real
+    const interval = setInterval(loadData, 2000);
 
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-      window.removeEventListener('focus', handleStorageChange);
-      clearInterval(interval);
-    };
-  }, [getDailyTotals]);
+    return () => clearInterval(interval);
+  }, [userId]);
 
   // Calcular metas personalizadas baseadas no perfil do usuário
   const userData = userProfile ? extractUserDataFromProfile(userProfile) : null;
@@ -94,9 +133,9 @@ export default function HomeScreen({ onAddMeal, onAddWorkout, userProfile }: Hom
     localStorage.setItem(`water_${new Date().toDateString()}`, newWaterIntake.toString());
   };
 
-  const getMealInfo = (type: Meal["type"]) => {
-    const meals = getMealsByType(type);
-    if (meals.length === 0) {
+  const getMealInfo = (type: string) => {
+    const typeMeals = meals.filter(m => m.meal_type === type);
+    if (typeMeals.length === 0) {
       return {
         time: "--:--",
         items: [],
@@ -105,18 +144,18 @@ export default function HomeScreen({ onAddMeal, onAddWorkout, userProfile }: Hom
       };
     }
 
-    const lastMeal = meals[meals.length - 1];
-    const time = new Date(lastMeal.timestamp).toLocaleTimeString("pt-BR", {
+    const lastMeal = typeMeals[typeMeals.length - 1];
+    const time = new Date(lastMeal.consumed_at).toLocaleTimeString("pt-BR", {
       hour: "2-digit",
       minute: "2-digit",
     });
 
-    const items = lastMeal.foods.map((food) => food.name);
+    const items = [lastMeal.food_name];
 
     return {
       time,
       items,
-      calories: lastMeal.totalNutrition.calories,
+      calories: lastMeal.calories,
       completed: true,
     };
   };

@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react";
 import { Search, Heart, Clock, Sparkles, ChefHat, Flame, Timer, Coffee, Cookie, IceCream, Apple, Banana, Cherry, Grape, Circle, Milk, Candy, Cake, Croissant, Soup, Droplet, Snowflake, Zap, ArrowLeft, X, Plus } from "lucide-react";
 import AddCustomRecipeSheet from "./AddCustomRecipeSheet";
+import { addMealToHistory } from "@/lib/supabase/queries";
+import { supabase } from "@/lib/supabase/client";
 
 interface Recipe {
   id: number;
@@ -36,6 +38,16 @@ export default function SOSScreen() {
   const [showAddRecipeSheet, setShowAddRecipeSheet] = useState(false);
   const [showFitTip, setShowFitTip] = useState(true);
   const [showRecipeModal, setShowRecipeModal] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+
+  // Carrega usuário autenticado
+  useEffect(() => {
+    const getUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      setUserId(user?.id || null);
+    };
+    getUser();
+  }, []);
 
   // Carrega receitas personalizadas do localStorage
   useEffect(() => {
@@ -592,7 +604,7 @@ export default function SOSScreen() {
     }
   };
 
-  const handleEatRecipe = (recipe: Recipe) => {
+  const handleEatRecipe = async (recipe: Recipe) => {
     const finalCalories = displayedCalories !== null ? displayedCalories : recipe.calories;
     const caloriesReduction = recipe.calories - finalCalories;
     
@@ -607,11 +619,31 @@ export default function SOSScreen() {
       setTimeout(() => setFeedbackMessage(""), 3000);
     }
 
-    // Adicionar ao histórico de refeições (localStorage)
+    const now = new Date();
+
+    // Salvar no Supabase se usuário estiver autenticado
+    if (userId) {
+      try {
+        await addMealToHistory({
+          user_id: userId,
+          meal_type: "meal",
+          food_name: recipe.name,
+          calories: finalCalories,
+          protein: finalProtein,
+          carbs: finalCarbs,
+          fat: finalFat,
+          notes: usedFitTip ? `Dica fit aplicada: ${recipe.fitTip}` : undefined,
+        });
+      } catch (error) {
+        console.error("Erro ao salvar no Supabase:", error);
+      }
+    }
+
+    // CORREÇÃO: Adicionar ao histórico de refeições no localStorage com estrutura IDÊNTICA
     const newMeal = {
       id: Date.now().toString(),
-      type: "snack", // Doces vão como "snack"
-      timestamp: new Date().toISOString(),
+      type: "snack",
+      timestamp: now.toISOString(),
       foods: [
         {
           name: recipe.name,
@@ -665,7 +697,7 @@ export default function SOSScreen() {
     Croissant,
   };
 
-  // Modal de receita (popup)
+  // Modal de receita (popup) - APENAS PARA ACOMPANHAR PREPARO
   if (showRecipeModal && selectedRecipe) {
     const IconComponent = iconMap[selectedRecipe.icon];
     
@@ -681,7 +713,7 @@ export default function SOSScreen() {
                 </div>
                 <div>
                   <h2 className="text-lg font-semibold text-slate-800">{selectedRecipe.name}</h2>
-                  <div className="flex items-center gap-3 text-xs text-slate-500">
+                  <div className="flex items-center gap-3 text-xs">
                     <div className="flex items-center gap-1">
                       <Flame className="w-3.5 h-3.5 text-orange-500" />
                       <span>{displayedCalories !== null ? displayedCalories : selectedRecipe.calories} kcal</span>
@@ -709,34 +741,48 @@ export default function SOSScreen() {
             </div>
           </div>
 
-          {/* Conteúdo */}
+          {/* Conteúdo - APENAS PARA ACOMPANHAR PREPARO */}
           <div className="p-6 space-y-6">
             {/* Ingredientes */}
-            <div className="bg-slate-50 rounded-2xl p-5">
-              <h3 className="text-base font-semibold text-slate-800 mb-4">Ingredientes</h3>
-              <ul className="space-y-2">
-                {selectedRecipe.ingredients?.map((ingredient, index) => (
-                  <li key={index} className="text-sm text-slate-700 leading-relaxed">
-                    • {ingredient}
-                  </li>
-                ))}
-              </ul>
-            </div>
+            {selectedRecipe.ingredients && selectedRecipe.ingredients.length > 0 && (
+              <div className="bg-slate-50 rounded-2xl p-5">
+                <h3 className="text-base font-semibold text-slate-800 mb-4">Ingredientes</h3>
+                <ul className="space-y-2">
+                  {selectedRecipe.ingredients.map((ingredient, index) => (
+                    <li key={index} className="text-sm text-slate-700 leading-relaxed">
+                      • {ingredient}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {/* Modo de Preparo */}
-            <div className="bg-slate-50 rounded-2xl p-5">
-              <h3 className="text-base font-semibold text-slate-800 mb-4">Modo de Preparo</h3>
-              <ol className="space-y-3">
-                {selectedRecipe.steps?.map((step, index) => (
-                  <li key={index} className="flex gap-3 text-sm text-slate-700 leading-relaxed">
-                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-pink-100 text-pink-600 font-semibold flex items-center justify-center text-xs">
-                      {index + 1}
-                    </span>
-                    <span className="flex-1">{step}</span>
-                  </li>
-                ))}
-              </ol>
-            </div>
+            {selectedRecipe.steps && selectedRecipe.steps.length > 0 && (
+              <div className="bg-slate-50 rounded-2xl p-5">
+                <h3 className="text-base font-semibold text-slate-800 mb-4">Modo de Preparo</h3>
+                <ol className="space-y-3">
+                  {selectedRecipe.steps.map((step, index) => (
+                    <li key={index} className="flex gap-3 text-sm text-slate-700 leading-relaxed">
+                      <span className="flex-shrink-0 w-6 h-6 rounded-full bg-pink-100 text-pink-600 font-semibold flex items-center justify-center text-xs">
+                        {index + 1}
+                      </span>
+                      <span className="flex-1">{step}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
+
+            {/* DICA FIT APLICADA (se usuário usou) */}
+            {usedFitTip && selectedRecipe.fitTip && (
+              <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-2xl p-5 border border-green-200">
+                <h3 className="text-base font-semibold text-green-800 mb-3">✓ Dica Fit Aplicada</h3>
+                <p className="text-sm text-green-700 leading-relaxed">
+                  {selectedRecipe.fitTip}
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -785,7 +831,7 @@ export default function SOSScreen() {
                   <Heart className={`w-5 h-5 ${favorites.includes(selectedRecipe.id) ? "fill-current" : ""}`} />
                 </button>
               </div>
-              <div className="flex items-center gap-3 text-xs text-slate-500 mt-1">
+              <div className="flex items-center gap-3 text-xs mt-1">
                 <div className="flex items-center gap-1">
                   <Flame className="w-3.5 h-3.5 text-orange-500" />
                   <span className={`transition-all duration-300 ${usedFitTip ? 'text-green-600 font-semibold' : ''}`}>
@@ -806,24 +852,34 @@ export default function SOSScreen() {
 
         {/* Conteúdo */}
         <div className="p-6 space-y-6">
-          {/* Macros para receitas personalizadas */}
-          {selectedRecipe.isCustom && selectedRecipe.protein !== undefined && (
-            <div className="bg-gradient-to-br from-slate-50 to-slate-100 border border-slate-200 rounded-2xl p-4">
-              <h3 className="text-sm font-semibold text-slate-700 mb-3">Informação Nutricional</h3>
-              <div className="grid grid-cols-3 gap-3">
-                <div className="text-center">
-                  <p className="text-xs text-slate-500 mb-1">Carboidratos</p>
-                  <p className="text-lg font-bold text-blue-600">{selectedRecipe.carbs}g</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-xs text-slate-500 mb-1">Proteínas</p>
-                  <p className="text-lg font-bold text-green-600">{selectedRecipe.protein}g</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-xs text-slate-500 mb-1">Gorduras</p>
-                  <p className="text-lg font-bold text-purple-600">{selectedRecipe.fat}g</p>
-                </div>
-              </div>
+          {/* Ingredientes */}
+          {selectedRecipe.ingredients && selectedRecipe.ingredients.length > 0 && (
+            <div className="bg-slate-50 rounded-2xl p-5">
+              <h3 className="text-base font-semibold text-slate-800 mb-4">Ingredientes</h3>
+              <ul className="space-y-2">
+                {selectedRecipe.ingredients.map((ingredient, index) => (
+                  <li key={index} className="text-sm text-slate-700 leading-relaxed">
+                    • {ingredient}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Modo de Preparo */}
+          {selectedRecipe.steps && selectedRecipe.steps.length > 0 && (
+            <div className="bg-slate-50 rounded-2xl p-5">
+              <h3 className="text-base font-semibold text-slate-800 mb-4">Modo de Preparo</h3>
+              <ol className="space-y-3">
+                {selectedRecipe.steps.map((step, index) => (
+                  <li key={index} className="flex gap-3 text-sm text-slate-700 leading-relaxed">
+                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-pink-100 text-pink-600 font-semibold flex items-center justify-center text-xs">
+                      {index + 1}
+                    </span>
+                    <span className="flex-1">{step}</span>
+                  </li>
+                ))}
+              </ol>
             </div>
           )}
 
@@ -888,7 +944,7 @@ export default function SOSScreen() {
         <h2 className="text-lg font-inter font-semibold text-slate-800">
           SOS Doce
         </h2>
-        <p className="text-xs text-slate-500 mt-1">
+        <p className="text-xs mt-1">
           Receitas rápidas para matar a vontade
         </p>
       </div>
